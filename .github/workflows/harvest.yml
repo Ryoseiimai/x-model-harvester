@@ -2,8 +2,8 @@ name: harvest
 
 on:
   schedule:
-    # 30分おき（GitHub cronは混雑時に数時間遅れることがある前提で運用する）
-    - cron: "*/30 * * * *"
+    # 4時間おき（X読み取り課金 $0.005/件×10件＝1回$0.05・月約$9）（GitHub cronは混雑時に数時間遅れることがある前提で運用する）
+    - cron: "17 */4 * * *"
   workflow_dispatch: {}
 
 concurrency:

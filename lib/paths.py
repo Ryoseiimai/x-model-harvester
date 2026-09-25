@@ -10,7 +10,7 @@ BOOKMARKS_URL = f"https://api.x.com/2/users/{X_USER_ID}/bookmarks"
 
 # 直近分だけ取得（課金抑制・既処理IDで打ち切り）
 FETCH_PAGES = 1
-FETCH_MAX_RESULTS = 20
+FETCH_MAX_RESULTS = 10
 
 # rclone remote（個人Google Drive）
 DRIVE_REMOTE = "ryosei_google_drive"
