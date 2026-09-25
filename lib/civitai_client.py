@@ -52,5 +52,5 @@ def resolve_civitai_file(link: CivitaiLink) -> dict:
         "filename": primary.get("name"),
         "size": int(primary.get("sizeKB", 0) * 1024) if primary.get("sizeKB") else None,
         "model_type": data.get("type", ""),
-        "license": "商用利用可" if data.get("allowCommercialUse") else "要確認",
+        "allow_commercial_use": data.get("allowCommercialUse"),
     }

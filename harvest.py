@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from lib import civitai_client, extract, fetch_bookmarks, hf_client, name_search, notify, readme_update, state
+from lib import civitai_client, extract, fetch_bookmarks, hf_client, license, name_search, notify, readme_update, state
 from lib.paths import DRY_RUN, MAX_RETRY_COUNT
 
 
@@ -61,12 +61,12 @@ def process_tweet(tweet: dict, st: dict) -> dict | None:
         if link.kind == "huggingface":
             info = hf_client.resolve_hf_file(link.parsed)
             model_kind = hf_client.guess_model_kind(info["filename"])
-            license_ = "要確認"
+            commercial_use = license.resolve_hf_license(link.parsed.repo_id)
             headers = None
         else:
             info = civitai_client.resolve_civitai_file(link.parsed)
             model_kind = _civitai_type_to_kind(info.get("model_type", ""))
-            license_ = info.get("license", "要確認")
+            commercial_use = license.classify_civitai_commercial_use(info.get("allow_commercial_use"))
             headers = None
     except (hf_client.HFResolveError, civitai_client.CivitaiResolveError) as exc:
         st["items"][tweet_id] = {"status": "failed", "reason": str(exc), "retry_count": 0}
@@ -95,7 +95,8 @@ def process_tweet(tweet: dict, st: dict) -> dict | None:
         "filename": info["filename"],
         "model_kind": model_kind,
         "size": result["size"],
-        "license": license_,
+        "commercial_use": commercial_use["category"],
+        "commercial_use_basis": commercial_use.get("basis", "-"),
         "tweet_url": tweet["url"],
         "model_url": link.url,
         "fetched_at": datetime.date.today().isoformat(),

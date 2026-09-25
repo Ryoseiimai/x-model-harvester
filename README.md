@@ -94,7 +94,7 @@ DRY_RUN=1 python harvest.py
 - **GitHub cronの遅延**: 数時間遅れることがある前提で30分間隔にしている。急ぎたい場合は`workflow_dispatch`で手動実行（既定DRY_RUNなので本番実行したい場合はワークフローの条件を一時的に変えるか、リポジトリ変数で制御する仕組みを別途足す）。
 - **1ファイルの上限は25GB**: ダウンロード中にストリームで打ち切る。
 - **ダウンロード対象の判定は拡張子・ファイル名ベースのヒューリスティック**（`.safetensors`/`.gguf`優先、fp8/量子化優先）。命名規則から外れたリポジトリでは誤選択の可能性がある。
-- **ライセンス表記**: HF側は現状「要確認」固定（`cardData.license`を読む処理は未実装）。Civitai側は`allowCommercialUse`のみで判定した簡易表記。
+- **商用利用可否の判定**: `lib/license.py`が「商用可」「商用不可」「有料ライセンスで可（購入先URL）」「要確認」の4区分で判定する。HF側はcardData.license／tagsの`license:*`、無い場合はcardData.base_modelを最大2段辿って元モデルのライセンスを継承する。既知のライセンスマップ以外（other・未知）は「要確認」として扱い、実際に商用利用する前は必ず本人が現物のライセンスページを確認する。Civitai側は`allowCommercialUse`（文字列配列/真偽値）で判定する。
 - **通知はGmail SMTP（アプリパスワード）方式のみ**。既存のSlack/Mail.app AppleScript通知基盤はmacOSローカル前提でGitHub Actionsから使えないため流用していない。
 
 ## ファイル構成
@@ -108,6 +108,7 @@ DRY_RUN=1 python harvest.py
 | `lib/extract.py` | HF/Civitaiリンク抽出（ネットワークなし・テスト対象） |
 | `lib/hf_client.py` | HuggingFaceのファイル解決 |
 | `lib/civitai_client.py` | Civitaiのファイル解決 |
+| `lib/license.py` | 商用利用可否の判定（4区分。HFはcardData.license/tags、派生モデルはbase_modelを最大2段継承。Civitaiはallow_commercial_use） |
 | `lib/downloader.py` | DL→Driveアップロード→ローカル削除 |
 | `lib/state.py` | Drive上の状態JSON読み書き |
 | `lib/readme_update.py` | Drive上のREADME一覧表更新 |

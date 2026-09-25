@@ -7,7 +7,10 @@ from pathlib import Path
 
 from .paths import DRIVE_README_PATH
 
-TABLE_HEADER = "| モデル名 | 種類 | サイズ | ライセンス | 元投稿URL | 元モデルURL | 取得日 |\n|---|---|---|---|---|---|---|\n"
+LICENSE_LEGEND = (
+    "商用に使えるのは『商用可』のみ。『有料ライセンスで可』は使う時に購入。『要確認』は使わない。\n\n"
+)
+TABLE_HEADER = "| モデル名 | 種類 | サイズ | 商用利用 | 元投稿URL | 元モデルURL | 取得日 |\n|---|---|---|---|---|---|---|\n"
 
 
 def _human_size(size_bytes: int | None) -> str:
@@ -20,12 +23,20 @@ def _human_size(size_bytes: int | None) -> str:
     return f"{mb:.1f}MB"
 
 
+def _format_commercial_use(entry: dict) -> str:
+    category = entry.get("commercial_use", "要確認")
+    basis = entry.get("commercial_use_basis", "-")
+    if not basis or basis == "-":
+        return category
+    return f"{category}（{basis}）"
+
+
 def build_row(entry: dict) -> str:
     return (
         f"| {entry.get('filename', '-')} "
         f"| {entry.get('model_kind', '-')} "
         f"| {_human_size(entry.get('size'))} "
-        f"| {entry.get('license', '要確認')} "
+        f"| {_format_commercial_use(entry)} "
         f"| {entry.get('tweet_url', '-')} "
         f"| {entry.get('model_url', '-')} "
         f"| {entry.get('fetched_at', '-')} |\n"
@@ -44,8 +55,11 @@ def fetch_current_readme() -> str:
             text=True,
         )
         if result.returncode != 0 or not tmp_path.exists():
-            return f"# ComfyUIモデル倉庫\n\nX ブックマーク自動収穫で貯まったモデル一覧。\n\n{TABLE_HEADER}"
-        return tmp_path.read_text(encoding="utf-8")
+            return f"# ComfyUIモデル倉庫\n\nX ブックマーク自動収穫で貯まったモデル一覧。\n\n{LICENSE_LEGEND}{TABLE_HEADER}"
+        content = tmp_path.read_text(encoding="utf-8")
+        if LICENSE_LEGEND.strip() not in content and TABLE_HEADER in content:
+            content = content.replace(TABLE_HEADER, LICENSE_LEGEND + TABLE_HEADER, 1)
+        return content
 
 
 def _write_readme(content: str) -> None:
