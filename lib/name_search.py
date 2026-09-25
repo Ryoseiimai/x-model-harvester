@@ -15,6 +15,10 @@ import requests
 
 HF_SEARCH_API = "https://huggingface.co/api/models"
 
+# URL全般（http/https/t.co短縮含む任意ドメイン）。候補抽出の前に本文から取り除く。
+# 除去しないと "t.co/xxxx" が org/repo パターンに誤ヒットしノイズになる。
+_URL_RE = re.compile(r"https?://\S+")
+
 # 候補抽出パターン。
 # 1) 所有格: "Kijai's ... Minimax_h3_ref2va_pruned_w6a8_g32"（絵文字・改行を挟んでもよい）
 _POSSESSIVE_RE = re.compile(
@@ -37,7 +41,12 @@ class NameCandidate:
 
 
 def extract_name_candidates(text: str) -> list[NameCandidate]:
-    """本文からモデル名っぽい候補を抽出する（重複除去・出現順維持）。"""
+    """本文からモデル名っぽい候補を抽出する（重複除去・出現順維持）。
+
+    URL（t.co短縮リンク含む）は先に除去する。除去しないと "t.co/xxxx" が
+    org/repo パターンに誤ヒットしてノイズになる。
+    """
+    text = _URL_RE.sub(" ", text)
     seen: set[str] = set()
     candidates: list[NameCandidate] = []
 
@@ -72,6 +81,48 @@ def _normalize(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+AUTHOR_LIST_LIMIT = 50
+
+
+def _match_siblings(repo_id: str, siblings: list, target: str) -> bool:
+    for s in siblings:
+        fname = s.get("rfilename", "")
+        base = fname.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        norm_file = _normalize(base)
+        if norm_file and target and (target == norm_file or target in norm_file or norm_file in target):
+            return True
+    return False
+
+
+def _search_by_author_repo_listing(candidate: NameCandidate, http_get=requests.get) -> dict | None:
+    """所有格パターン（"Kijai's ..."）専用: `search=`によるあいまい検索ではヒット率が低いため、
+    著者のリポジトリを最近更新順に列挙し、各リポジトリのsiblings（ファイル名）から
+    候補名を含むものを探す。`full=true`で1回のリクエストでsiblingsまで取得する。
+    """
+    if not candidate.author:
+        return None
+
+    params = {
+        "author": candidate.author,
+        "sort": "lastModified",
+        "direction": "-1",
+        "limit": AUTHOR_LIST_LIMIT,
+        "full": "true",
+    }
+    resp = http_get(HF_SEARCH_API, params=params, timeout=20)
+    resp.raise_for_status()
+    results = resp.json() or []
+
+    target = _normalize(candidate.name)
+    for r in results:
+        repo_id = r.get("id", "")
+        siblings = r.get("siblings", []) or []
+        if _match_siblings(repo_id, siblings, target):
+            return {"status": "confirmed", "repo_id": repo_id, "candidate": candidate.name}
+
+    return None
+
+
 def search_candidate_on_hf(candidate: NameCandidate, http_get=requests.get) -> dict:
     """HF検索APIで候補を検証する。
 
@@ -79,6 +130,11 @@ def search_candidate_on_hf(candidate: NameCandidate, http_get=requests.get) -> d
       {"status": "confirmed", "repo_id": "...", "candidate": name}
       {"status": "unconfirmed", "candidate": name, "top_hits": [...]}
     """
+    if candidate.author:
+        author_match = _search_by_author_repo_listing(candidate, http_get=http_get)
+        if author_match:
+            return author_match
+
     params: dict = {"search": candidate.name, "limit": 5}
     if candidate.author:
         params["author"] = candidate.author
@@ -109,12 +165,8 @@ def search_candidate_on_hf(candidate: NameCandidate, http_get=requests.get) -> d
         except requests.RequestException:
             continue
         siblings = (detail.json() or {}).get("siblings", []) or []
-        for s in siblings:
-            fname = s.get("rfilename", "")
-            base = fname.rsplit("/", 1)[-1].rsplit(".", 1)[0]
-            norm_file = _normalize(base)
-            if norm_file and target and (target == norm_file or target in norm_file or norm_file in target):
-                return {"status": "confirmed", "repo_id": repo_id, "candidate": candidate.name}
+        if _match_siblings(repo_id, siblings, target):
+            return {"status": "confirmed", "repo_id": repo_id, "candidate": candidate.name}
 
     top_hits = [r.get("id", "") for r in results[:3] if r.get("id")]
     return {"status": "unconfirmed", "candidate": candidate.name, "top_hits": top_hits}

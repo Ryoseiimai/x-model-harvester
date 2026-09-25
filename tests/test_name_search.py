@@ -39,6 +39,20 @@ def test_extract_candidate_zero_for_irrelevant_post():
     assert extract_name_candidates(text) == []
 
 
+def test_extract_candidate_ignores_tco_url():
+    text = "Check this out https://t.co/abcDEF123 amazing model release"
+    # t.co/xxxx が org/repo パターンに誤ヒットしないこと（本番run 36097554075で27件ノイズ化した原因）
+    assert extract_name_candidates(text) == []
+
+
+def test_extract_candidate_ignores_generic_https_url_but_keeps_real_candidate():
+    text = "Kijai's https://example.com/foo/bar Minimax_h3_ref2va_pruned_w6a8_g32 released"
+    candidates = extract_name_candidates(text)
+    names = [c.name for c in candidates]
+    assert "example.com/foo" not in names
+    assert "foo/bar" not in names
+
+
 def test_find_model_from_text_confirms_via_repo_name_match(monkeypatch):
     text = "Kijai's \U0001F603\nMinimax_h3_ref2va_pruned_w6a8_g32\n\nits experimental"
 
@@ -52,6 +66,30 @@ def test_find_model_from_text_confirms_via_repo_name_match(monkeypatch):
     result = find_model_from_text(text, http_get=fake_get)
     assert result["status"] == "confirmed"
     assert result["repo_id"] == "Kijai/Minimax_h3_ref2va_pruned_w6a8_g32"
+
+
+def test_find_model_from_text_confirms_via_author_repo_listing_siblings():
+    """所有格パターンは著者リポジトリ一覧(full=true)のsiblingsから直接確定できる
+    （本番run 36097554075で「HF検索結果なし」になったバグの再発防止）。"""
+    text = "Kijai's \U0001F603\nMinimax_h3_ref2va_pruned_w6a8_g32\n\nits experimental"
+
+    def fake_get(url, params=None, timeout=None):
+        assert url.endswith("/api/models")
+        assert params.get("author") == "Kijai"
+        assert params.get("full") == "true"
+        return FakeResponse([
+            {"id": "Kijai/other-repo", "siblings": [{"rfilename": "unrelated.safetensors"}]},
+            {
+                "id": "Kijai/MiniMax-H3-experimental",
+                "siblings": [
+                    {"rfilename": "wip/minimax_h3_ref2va_pruned_w6a8_g32.safetensors"},
+                ],
+            },
+        ])
+
+    result = find_model_from_text(text, http_get=fake_get)
+    assert result["status"] == "confirmed"
+    assert result["repo_id"] == "Kijai/MiniMax-H3-experimental"
 
 
 def test_find_model_from_text_confirms_via_sibling_filename_match():
