@@ -4,7 +4,15 @@ on:
   schedule:
     # 1日1回 JST 3:17（X読み取り課金 $0.005/件×30件＝1回$0.15・月約$4.5）（GitHub cronは混雑時に数時間遅れることがある前提で運用する）
     - cron: "17 18 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "1=DRY_RUN（既定・DL/アップロードなし） / 0=本番実行"
+        type: choice
+        options:
+          - "1"
+          - "0"
+        default: "1"
 
 concurrency:
   group: harvest
@@ -50,7 +58,6 @@ jobs:
           CIVITAI_TOKEN: ${{ secrets.CIVITAI_TOKEN }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          # workflow_dispatch(手動実行)は事故防止のため既定でDRY_RUN。
-          # 本番実行させたいときはSecretsではなくRepository variableで
-          # DRY_RUN=0を明示するか、cron実行(常にDRY_RUN=0)に任せる。
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          # workflow_dispatch(手動実行)は input dry_run（既定"1"）で選べる。
+          # cron実行は常にDRY_RUN=0（本番）。
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.dry_run || '1') || '0' }}

@@ -11,19 +11,50 @@ import sys
 import tempfile
 from pathlib import Path
 
-from lib import civitai_client, extract, fetch_bookmarks, hf_client, notify, readme_update, state
+from lib import civitai_client, extract, fetch_bookmarks, hf_client, name_search, notify, readme_update, state
 from lib.paths import DRY_RUN, MAX_RETRY_COUNT
 
 
 def process_tweet(tweet: dict, st: dict) -> dict | None:
-    """1件のツイートを処理し、新規取得できたらエントリ情報を返す（未取得ならNone）。"""
+    """1件のツイートを処理し、新規取得できたらエントリ情報を返す（未取得ならNone）。
+
+    ダウンロードまで確定した場合は通常のエントリdictを、
+    リンクなし投稿から名前候補は見つかったが確証が持てなかった場合は
+    `{"_unconfirmed": True, ...}` を返す（呼び出し側でREADMEの別節に振り分ける）。
+    """
     tweet_id = tweet["id"]
     links = extract.extract_model_links(tweet["urls"])
 
     if not links:
-        st["items"][tweet_id] = {"status": "skip", "reason": "モデル系リンクなし"}
-        st["processed_ids"].append(tweet_id)
-        return None
+        guess = name_search.find_model_from_text(tweet.get("text", ""))
+        if guess is None:
+            st["items"][tweet_id] = {"status": "skip", "reason": "モデル系リンクなし"}
+            st["processed_ids"].append(tweet_id)
+            return None
+
+        if guess["status"] == "unconfirmed":
+            st["items"][tweet_id] = {
+                "status": "unconfirmed",
+                "candidate": guess["candidate"],
+                "top_hits": guess.get("top_hits", []),
+            }
+            st["processed_ids"].append(tweet_id)
+            return {
+                "_unconfirmed": True,
+                "candidate": guess["candidate"],
+                "top_hits": guess.get("top_hits", []),
+                "tweet_url": tweet["url"],
+            }
+
+        # confirmed: HF検索で確定した repo_id をリンクとして扱い、以降は通常のHF処理に合流する
+        org, repo = guess["repo_id"].split("/", 1)
+        links = [
+            extract.ExtractedLink(
+                kind="huggingface",
+                url=f"https://huggingface.co/{guess['repo_id']}",
+                parsed=extract.HFLink(org=org, repo=repo, is_direct_file=False),
+            )
+        ]
 
     link = links[0]  # 1投稿1モデル想定。複数あれば先頭を採用。
     try:
@@ -111,12 +142,17 @@ def main() -> int:
     st = state.load_state()
     processed_ids = set(st["processed_ids"])
     new_entries = []
+    new_unconfirmed = []
 
     for tweet in tweets:
         if tweet["id"] in processed_ids:
             continue
         entry = process_tweet(tweet, st)
-        if entry:
+        if not entry:
+            continue
+        if entry.get("_unconfirmed"):
+            new_unconfirmed.append(entry)
+        else:
             new_entries.append(entry)
 
     retry_failed_items(st)
@@ -125,6 +161,9 @@ def main() -> int:
     if new_entries:
         readme_update.append_entries(new_entries)
         notify.notify_new_models(new_entries)
+
+    if new_unconfirmed:
+        readme_update.append_unconfirmed_entries(new_unconfirmed)
 
     print(f"新規処理: {len(new_entries)}件")
     return 0
